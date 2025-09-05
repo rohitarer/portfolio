@@ -565,7 +565,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                             'https://drive.google.com/your-resume-link',
                           ),
                       icon: Image.asset(
-                        'assets/resume.png', // <- your resume icon image
+                        'assets/resume2.png', // <- your resume icon image
                         width: 18,
                         height: 18,
                         color:
@@ -810,7 +810,7 @@ class _AppDrawer extends StatelessWidget {
             const Spacer(),
             ListTile(
               leading: Image.asset(
-                'assets/resume.png', // <- your resume icon
+                'assets/resume2.png', // <- your resume icon
                 width: 24,
                 height: 24,
                 // color: Theme.of(context).colorScheme.onSurface, // uncomment to tint monochrome assets
@@ -1036,7 +1036,7 @@ class _Hero extends StatelessWidget {
                               // LinkedIn (image-based)
                               _ImageActionButton(
                                 asset:
-                                    'assets/linkedin.png', // <- your asset path
+                                    'assets/linkedin2.png', // <- your asset path
                                 tooltip: 'LinkedIn',
                                 semanticsLabel: 'Open LinkedIn',
                                 onTap: onLinkedIn,
@@ -2241,7 +2241,7 @@ class _Contact extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             _ImageActionButton(
-              asset: 'assets/linkedin.png',
+              asset: 'assets/linkedin2.png',
               tooltip: 'LinkedIn',
               semanticsLabel: 'LinkedIn',
               onTap:
@@ -2357,7 +2357,7 @@ class _Footer extends StatelessWidget {
                 size: 44,
               ),
               _ImageActionButton(
-                asset: 'assets/linkedin.png',
+                asset: 'assets/linkedin2.png',
                 tooltip: 'LinkedIn',
                 semanticsLabel: 'LinkedIn',
                 onTap:
