@@ -1,6 +1,6 @@
 // lib/main.dart
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter;
+import 'dart:ui' show ImageFilter, PointerDeviceKind;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
@@ -19,6 +19,319 @@ Future<void> _open(String url) async {
     // fallback: copy if the device can't launch
     await Clipboard.setData(ClipboardData(text: url));
   }
+}
+
+/// ---------- 3D PLATFORM BACKGROUND (full-screen, colorful) ----------
+class _Platform3DBackground extends StatefulWidget {
+  final AnimationController controller; // reuse your _blobCtrl
+  const _Platform3DBackground({required this.controller});
+
+  @override
+  State<_Platform3DBackground> createState() => _Platform3DBackgroundState();
+}
+
+class _Platform3DBackgroundState extends State<_Platform3DBackground> {
+  late final Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: widget.controller, curve: Curves.linear));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gridTint = Theme.of(context).colorScheme.primary;
+    final fadeColor = Theme.of(context).colorScheme.surface;
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _anim,
+        builder:
+            (_, __) => CustomPaint(
+              painter: _Platform3DPainter(
+                t: _anim.value,
+                gridTint: gridTint,
+                fadeColor: fadeColor,
+                isDark: Theme.of(context).brightness == Brightness.dark,
+              ),
+            ),
+      ),
+    );
+  }
+}
+
+class _Platform3DPainter extends CustomPainter {
+  final double t; // 0..1 looping
+  final Color gridTint; // seed color from theme
+  final Color fadeColor; // kept for API parity
+  final bool isDark;
+
+  _Platform3DPainter({
+    required this.t,
+    required this.gridTint,
+    required this.fadeColor,
+    required this.isDark,
+  });
+
+  // Perspective projection
+  Offset _project(
+    Size size,
+    double x,
+    double y,
+    double z, {
+    double fov = 1.15,
+    double camY = 2.0,
+    double camZ = -3.8,
+  }) {
+    final wx = x;
+    final wy = y - camY;
+    final wz = z - camZ;
+
+    final eps = 1e-6;
+    final invZ = 1 / (wz.abs() < eps ? eps : wz);
+    final focal = (size.shortestSide) / (2 * math.tan(fov / 2));
+
+    final sx = size.width * 0.5 + wx * focal * invZ;
+    final sy = size.height * 0.62 + wy * focal * invZ; // horizon ~38% from top
+    return Offset(sx, sy);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final seedHue = HSLColor.fromColor(gridTint).hue;
+    final baseHue =
+        (0.7 * 210.0 + 0.3 * seedHue) % 360.0; // anchor around blue/teal
+
+    Color peacock(
+      double hue, {
+      double s = 0.90,
+      double lDark = 0.58,
+      double lLight = 0.46, // slightly darker than 0.5 so it "reads" on white
+      double a = 1,
+    }) {
+      final l = isDark ? lDark : lLight;
+      return HSLColor.fromAHSL(a, hue % 360.0, s, l).toColor();
+    }
+
+    // ---------- BACKDROP ----------
+    if (isDark) {
+      // keep the rich neon dark background
+      final sky =
+          Paint()
+            ..shader = const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF0B0F17), Color(0xFF0E1624), Color(0xFF101826)],
+              stops: [0.0, 0.45, 1.0],
+            ).createShader(Offset.zero & size);
+      canvas.drawRect(Offset.zero & size, sky);
+    } else {
+      // Bright peacock-ish light background (white → skyblue → mint aqua)
+      final sky =
+          Paint()
+            ..shader = const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color(0xFFFFFFFF), // pure white at top
+                Color(0xFFEAF7FF), // light sky-blue
+                Color(0xFFE7FFF6), // light mint/greenish
+              ],
+              stops: [0.0, 0.38, 1.0],
+            ).createShader(Offset.zero & size);
+      canvas.drawRect(Offset.zero & size, sky);
+    }
+
+    // ---------- PORTAL / SUN ----------
+    final sunCenter = Offset(size.width * 0.5, size.height * 0.28);
+    final sunR = size.shortestSide * (isDark ? 0.18 : 0.22);
+    final sunHue = baseHue + 22.0 * math.sin(t * 2 * math.pi * 0.4);
+    final sunCore = peacock(
+      sunHue,
+      s: isDark ? 0.95 : 0.80,
+      lDark: 0.68,
+      lLight: 0.58,
+      a:
+          isDark
+              ? 0.80
+              : 0.42, // lower alpha on light to avoid washing out white
+    );
+    final sunPaint =
+        Paint()
+          ..shader = RadialGradient(
+            colors: [
+              sunCore,
+              sunCore.withOpacity(isDark ? 0.40 : 0.22),
+              Colors.transparent,
+            ],
+            stops: const [0.0, 0.55, 1.0],
+          ).createShader(Rect.fromCircle(center: sunCenter, radius: sunR));
+    canvas.drawCircle(sunCenter, sunR, sunPaint);
+
+    // ---------- SCANNING SWEEP ----------
+    final sweepY = size.height * (0.46 + 0.12 * math.sin(t * 2 * math.pi));
+    final sweepColor = peacock(
+      baseHue + 8,
+      s: 0.9,
+      lDark: 0.62,
+      lLight: 0.48,
+      a: isDark ? 0.28 : 0.22,
+    );
+    final sweepPaint =
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.transparent, sweepColor, Colors.transparent],
+            stops: const [0.0, 0.5, 1.0],
+          ).createShader(Rect.fromLTWH(0, sweepY - 90, size.width, 180))
+          ..blendMode =
+              isDark
+                  ? BlendMode.plus
+                  : BlendMode.srcOver; // additive only in dark
+    canvas.drawRect(Rect.fromLTWH(0, sweepY - 90, size.width, 180), sweepPaint);
+
+    // ---------- GRID ----------
+    const gridHalfWidth = 10;
+    const gridDepth = 30;
+    const step = 1.0;
+    const waveAmp = 0.28;
+    const waveFreqX = 0.62;
+    const waveFreqZ = 0.20;
+    const scrollSpeed = 12.0;
+
+    final zScroll = t * scrollSpeed;
+
+    // On white, use thicker strokes & no blur for crispness
+    final strokeBoost = isDark ? 1.0 : 1.5;
+    final blurRadius = isDark ? 2.0 : 0.0;
+
+    final linePaint =
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..isAntiAlias = true
+          ..blendMode = isDark ? BlendMode.plus : BlendMode.srcOver
+          ..maskFilter =
+              (blurRadius > 0)
+                  ? MaskFilter.blur(BlurStyle.outer, blurRadius)
+                  : null;
+
+    // Neon color per depth/column (peacock range) + visibility boost on light
+    Color depthColor(double z, {double hueBias = 0.0}) {
+      final dist = (z / (gridDepth + 4)).clamp(0.0, 1.0); // 0 near .. 1 far
+      final center = baseHue + 10; // keep peacock range
+      final span = 60.0;
+      final wobble = 8.0 * math.sin(t * 2 * math.pi * 0.5);
+      final hue =
+          center + (hueBias * 0.15 + (1 - dist) * (span * 0.4) + wobble);
+
+      if (isDark) {
+        // Dark mode (unchanged neon feel)
+        final alpha = 0.20 + 0.75 * (1 - dist);
+        return HSLColor.fromAHSL(alpha, hue % 360, 0.90, 0.60).toColor();
+      } else {
+        // // LIGHT MODE: make strokes lighter/pastel & a bit more transparent
+        // final alpha = 0.12 + 0.38 * (1 - dist); // lower opacity on white
+        // final sat = 0.50; // less saturated (pastel)
+        // final light = 0.72; // brighter so it reads on white
+        // return HSLColor.fromAHSL(alpha, hue % 360, sat, light).toColor();
+        // LIGHT MODE: bluish–greenish (peacock) strokes on white
+        final dist = (z / (gridDepth + 4)).clamp(0.0, 1.0);
+        final alpha =
+            0.14 + 0.40 * (1 - dist); // a bit stronger so it reads on white
+        final centerHue = 188.0; // teal/peacock center (~blue-green)
+        final span = 24.0; // small range around teal
+        final wobble = 6.0 * math.sin(t * 2 * math.pi * 0.6); // subtle shimmer
+        final hue =
+            (centerHue +
+                hueBias * 0.10 + // slight rainbow across X
+                (1 - dist) * (span * 0.5) + // nearer = a touch more cyan
+                wobble) %
+            360.0;
+
+        final sat = 0.58; // moderately vivid (pastel-ish)
+        final light = 0.70; // bright enough on white
+        return HSLColor.fromAHSL(alpha, hue, sat, light).toColor();
+      }
+    }
+
+    // Horizontal lines
+    for (int rz = 0; rz < gridDepth; rz++) {
+      final z = rz * step + zScroll % step;
+      final path = Path();
+      bool first = true;
+
+      for (int rx = -gridHalfWidth; rx <= gridHalfWidth; rx++) {
+        final x = rx * step.toDouble();
+        final y =
+            math.sin((x * waveFreqX) + (z * waveFreqZ) + t * 6.0) * waveAmp;
+        final p = _project(size, x, y, z);
+        if (first) {
+          path.moveTo(p.dx, p.dy);
+          first = false;
+        } else {
+          path.lineTo(p.dx, p.dy);
+        }
+      }
+
+      final near = 1.0 - (rz / gridDepth);
+      linePaint
+        ..color = depthColor(z)
+        ..strokeWidth = (1.0 + 1.1 * near) * strokeBoost;
+      canvas.drawPath(path, linePaint);
+    }
+
+    // Vertical lines (rainbow across X within peacock range)
+    for (int rx = -gridHalfWidth; rx <= gridHalfWidth; rx++) {
+      final x = rx * step.toDouble();
+      final path = Path();
+      bool first = true;
+
+      for (int rz = 0; rz < gridDepth; rz++) {
+        final z = rz * step + zScroll % step;
+        final y =
+            math.sin((x * waveFreqX) + (z * waveFreqZ) + t * 6.0) * waveAmp;
+        final p = _project(size, x, y, z);
+        if (first) {
+          path.moveTo(p.dx, p.dy);
+          first = false;
+        } else {
+          path.lineTo(p.dx, p.dy);
+        }
+      }
+
+      final bias = (rx + gridHalfWidth) * 5.0;
+      linePaint
+        ..color = depthColor(0.0, hueBias: bias)
+        ..strokeWidth = 1.4 * strokeBoost;
+      canvas.drawPath(path, linePaint);
+    }
+
+    // Vignette: keep extremely subtle in light mode
+    final vignette =
+        Paint()
+          ..shader = RadialGradient(
+            center: const Alignment(0, 0.35),
+            radius: 1.2,
+            colors: [
+              Colors.transparent,
+              Colors.black.withOpacity(isDark ? 0.10 : 0.05),
+            ],
+            stops: const [0.6, 1.0],
+          ).createShader(Offset.zero & size);
+    canvas.drawRect(Offset.zero & size, vignette);
+  }
+
+  @override
+  bool shouldRepaint(covariant _Platform3DPainter old) =>
+      old.t != t ||
+      old.gridTint != gridTint ||
+      old.fadeColor != fadeColor ||
+      old.isDark != isDark;
 }
 
 class _ImageActionButton extends StatelessWidget {
@@ -248,38 +561,61 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     const SizedBox(width: 8),
                     FilledButton.icon(
                       onPressed:
-                          () => _copy(
-                            context,
+                          () => _open(
                             'https://drive.google.com/your-resume-link',
                           ),
-                      icon: const Icon(Icons.description_outlined, size: 18),
+                      icon: Image.asset(
+                        'assets/resume.png', // <- your resume icon image
+                        width: 18,
+                        height: 18,
+                        color:
+                            Theme.of(context)
+                                .colorScheme
+                                .onPrimary, // remove if icon is multicolor
+                      ),
                       label: const Text('Resume'),
                     ),
+
                     const SizedBox(width: 12),
                   ],
         ),
       ),
-      body: SingleChildScrollView(
-        controller: _scrollCtrl,
-        child: Column(
-          children: [
-            _Hero(
-              controller: _blobCtrl,
-              onHire: () => _open('mailto:rohitarer00@gmail.com'),
-              onGitHub: () => _open('https://github.com/rohitarer'),
-              onLinkedIn:
-                  () => _open(
-                    'https://www.linkedin.com/in/rohit-arer-a96294214/',
-                  ),
-            ),
 
-            _SectionPad(key: aboutKey, child: const _About()),
-            _SectionPad(key: expKey, child: const _Experience()),
-            _SectionPad(key: projectsKey, child: const _Projects()),
-            _SectionPad(key: contactKey, child: const _Contact()),
-            const _Footer(),
-          ],
-        ),
+      // 🔧 Background + content layered correctly
+      body: Stack(
+        children: [
+          // Full-screen 3D background
+          Positioned.fill(
+            child: IgnorePointer(
+              child: _Platform3DBackground(
+                controller: _blobCtrl, // keep your looping controller
+              ),
+            ),
+          ),
+
+          // Foreground scrollable content
+          SingleChildScrollView(
+            controller: _scrollCtrl,
+            child: Column(
+              children: [
+                _Hero(
+                  controller: _blobCtrl,
+                  onHire: () => _open('mailto:rohitarer00@gmail.com'),
+                  onGitHub: () => _open('https://github.com/rohitarer'),
+                  onLinkedIn:
+                      () => _open(
+                        'https://www.linkedin.com/in/rohit-arer-a96294214/',
+                      ),
+                ),
+                _SectionPad(key: aboutKey, child: const _About()),
+                _SectionPad(key: expKey, child: const _Experience()),
+                _SectionPad(key: projectsKey, child: const _Projects()),
+                _SectionPad(key: contactKey, child: const _Contact()),
+                const _Footer(),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -469,13 +805,17 @@ class _AppDrawer extends StatelessWidget {
             item('Contact', keys.contact, Icons.mail_outline),
             const Spacer(),
             ListTile(
-              leading: const Icon(Icons.description_outlined),
+              leading: Image.asset(
+                'assets/resume.png', // <- your resume icon
+                width: 24,
+                height: 24,
+                // color: Theme.of(context).colorScheme.onSurface, // uncomment to tint monochrome assets
+              ),
               title: const Text('Resume'),
-              onTap:
-                  () => _copy(
-                    context,
-                    'https://drive.google.com/your-resume-link',
-                  ),
+              onTap: () {
+                Navigator.pop(context); // close the drawer
+                _open('https://drive.google.com/your-resume-link');
+              },
             ),
           ],
         ),
@@ -506,43 +846,45 @@ class _Hero extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           // Subtle gradient background
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Theme.of(context).colorScheme.primary.withOpacity(0.06),
-                    Theme.of(context).colorScheme.secondary.withOpacity(0.05),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
-          ),
-          // Animated blobs
-          _AnimatedBlob(
-            controller: controller,
-            size: isMobile ? 220 : 300,
-            color: Theme.of(context).colorScheme.primary,
-            dx: 0.15,
-            dy: -0.12,
-          ),
-          _AnimatedBlob(
-            controller: controller,
-            size: isMobile ? 260 : 360,
-            color: Theme.of(context).colorScheme.tertiary,
-            dx: -0.25,
-            dy: 0.18,
-          ),
-          _AnimatedBlob(
-            controller: controller,
-            size: isMobile ? 180 : 240,
-            color: Theme.of(context).colorScheme.secondary,
-            dx: 0.28,
-            dy: 0.22,
-          ),
+          // Positioned.fill(
+          //   child: DecoratedBox(
+          //     decoration: BoxDecoration(
+          //       gradient: LinearGradient(
+          //         begin: Alignment.topLeft,
+          //         end: Alignment.bottomRight,
+          //         colors: [
+          //           Theme.of(context).colorScheme.primary.withOpacity(0.06),
+          //           Theme.of(context).colorScheme.secondary.withOpacity(0.05),
+          //           Colors.transparent,
+          //         ],
+          //       ),
+          //     ),
+          //   ),
+          // ),
+          // // Animated blobs
+          // _AnimatedBlob(
+          //   controller: controller,
+          //   size: isMobile ? 220 : 300,
+          //   color: Theme.of(context).colorScheme.primary,
+          //   dx: 0.15,
+          //   dy: -0.12,
+          // ),
+          // _AnimatedBlob(
+          //   controller: controller,
+          //   size: isMobile ? 260 : 360,
+          //   color: Theme.of(context).colorScheme.tertiary,
+          //   dx: -0.25,
+          //   dy: 0.18,
+          // ),
+          // _AnimatedBlob(
+          //   controller: controller,
+          //   size: isMobile ? 180 : 240,
+          //   color: Theme.of(context).colorScheme.secondary,
+          //   dx: 0.28,
+          //   dy: 0.22,
+          // ),
+          // ✅ Add: true 3D platform background
+          // Positioned.fill(child: _Platform3DBackground(controller: controller)),
 
           // Content
           Align(
@@ -1053,6 +1395,7 @@ class _ExpItemState extends State<_ExpItem> {
 }
 
 /// ---------- PROJECTS ----------
+
 // ===================== PROJECTS =====================
 class _Projects extends StatelessWidget {
   const _Projects();
@@ -1086,7 +1429,6 @@ class _Projects extends StatelessWidget {
           'Razorpay',
           'ESP32-CAM',
         ],
-        // siteUrl: 'https://www.nexabill.in',
         githubUrl: 'https://github.com/rohitarer',
         details: [
           'Built Admin/Cashier/Customer apps with dashboards, QR billing, and OTP verification.',
@@ -1145,20 +1487,7 @@ class _Projects extends StatelessWidget {
       ),
     ];
 
-    Widget grid() {
-      final cross = isTablet ? 2 : 3;
-      return GridView.count(
-        crossAxisCount: cross,
-        shrinkWrap: true,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 16,
-        childAspectRatio: 1.35,
-        physics: const NeverScrollableScrollPhysics(),
-        children: cards,
-      );
-    }
-
-    // ---- Adaptive height for mobile to avoid overflow
+    // ---- MOBILE: keep your compact PageView carousel (bounded height)
     final viewportWidth = MediaQuery.of(context).size.width;
     const mobileImageAspect = 2.4; // wider banner to save vertical space
     final imageH = (viewportWidth * 0.92) / mobileImageAspect;
@@ -1166,7 +1495,7 @@ class _Projects extends StatelessWidget {
         236.0 * MediaQuery.of(context).textScaleFactor.clamp(1.0, 1.2);
     final mobileCarouselHeight = (imageH + baseTextH + 12).clamp(420.0, 520.0);
 
-    Widget carousel() {
+    Widget mobileCarousel() {
       return _Glass(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: SizedBox(
@@ -1184,11 +1513,51 @@ class _Projects extends StatelessWidget {
       );
     }
 
-    return _Section(title: 'PROJECTS', child: isMobile ? carousel() : grid());
+    // ---- WEB/TABLET/DESKTOP: horizontal scroller with mouse/trackpad drag
+    final behavior = const MaterialScrollBehavior().copyWith(
+      dragDevices: {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      },
+    );
+
+    // Card size tuned to avoid vertical overflow and keep things snappy
+    final cardWidth = isTablet ? 380.0 : 420.0;
+    final laneHeight = isTablet ? 520.0 : 560.0;
+
+    Widget desktopHorizontal() {
+      return ScrollConfiguration(
+        behavior: behavior,
+        child: SizedBox(
+          height: laneHeight, // <- bounds the height inside your Column
+          child: Scrollbar(
+            interactive: true,
+            thumbVisibility: kIsWeb, // show thumb on web
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: cards.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 16),
+              itemBuilder:
+                  (_, i) => SizedBox(width: cardWidth, child: cards[i]),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return _Section(
+      title: 'PROJECTS',
+      // Use horizontal scroller on web/desktop; PageView on mobile
+      child: isMobile ? mobileCarousel() : desktopHorizontal(),
+    );
   }
 }
 
-// ===================== PROJECT CARD (assets + top-crop + full-screen viewer) =====================
+// ===================== PROJECT CARD (unchanged behavior) =====================
 class _ProjectCard extends StatefulWidget {
   final String title, desc;
   final List<String> images;
@@ -1286,7 +1655,7 @@ class _ProjectCardState extends State<_ProjectCard> {
         children: [
           // Inline image carousel
           AspectRatio(
-            aspectRatio: isMobile ? 1.6 : 16 / 9, // compact banner
+            aspectRatio: isMobile ? 1.6 : 16 / 9,
             child: Stack(
               fit: StackFit.expand,
               children: [
@@ -1310,13 +1679,12 @@ class _ProjectCardState extends State<_ProjectCard> {
                         child: Image.asset(
                           path,
                           fit: BoxFit.cover,
-                          alignment: Alignment.topCenter, // top-crop
+                          alignment: Alignment.topCenter,
                         ),
                       ),
                     );
                   },
                 ),
-                // Dots
                 Positioned(
                   right: 10,
                   bottom: 10,
@@ -1360,7 +1728,7 @@ class _ProjectCardState extends State<_ProjectCard> {
                   ),
                 ),
 
-                // Expandable details (desktop/tablet only to keep mobile card stable)
+                // Expandable details (desktop/tablet only)
                 if (!isMobile && (widget.details?.isNotEmpty ?? false)) ...[
                   const SizedBox(height: 8),
                   AnimatedCrossFade(
@@ -1391,14 +1759,14 @@ class _ProjectCardState extends State<_ProjectCard> {
                               .toList(),
                     ),
                   ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () => setState(() => open = !open),
-                      icon: Icon(open ? Icons.expand_less : Icons.expand_more),
-                      label: Text(open ? 'Less' : 'More'),
-                    ),
-                  ),
+                  // Align(
+                  //   alignment: Alignment.centerLeft,
+                  //   child: TextButton.icon(
+                  //     onPressed: () => setState(() => open = !open),
+                  //     icon: Icon(open ? Icons.expand_less : Icons.expand_more),
+                  //     label: Text(open ? 'Less' : 'More'),
+                  //   ),
+                  // ),
                 ],
 
                 // Actions row
@@ -1407,7 +1775,7 @@ class _ProjectCardState extends State<_ProjectCard> {
                   children: [
                     if (widget.siteUrl != null)
                       _ImageActionButton(
-                        asset: 'assets/web.png', // <- your website icon asset
+                        asset: 'assets/web.png',
                         tooltip: 'Website',
                         semanticsLabel: 'Open website',
                         onTap: () => _open(widget.siteUrl!),
@@ -1415,7 +1783,7 @@ class _ProjectCardState extends State<_ProjectCard> {
                     if (widget.githubUrl != null) ...[
                       const SizedBox(width: 6),
                       _ImageActionButton(
-                        asset: 'assets/github.png', // <- your GitHub icon asset
+                        asset: 'assets/github.png',
                         tooltip: 'GitHub',
                         semanticsLabel: 'Open GitHub',
                         onTap: () => _open(widget.githubUrl!),
@@ -1467,7 +1835,7 @@ class _ProjectCardState extends State<_ProjectCard> {
   }
 }
 
-// ===================== DETAILS SHEET (tap-to-fullscreen, assets) =====================
+// ===================== DETAILS SHEET =====================
 class _ProjectDetailsSheet extends StatefulWidget {
   final String title, desc;
   final List<String> images;
@@ -1535,7 +1903,6 @@ class _ProjectDetailsSheetState extends State<_ProjectDetailsSheet> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Drag hint bar
                 Center(
                   child: Container(
                     width: 44,
@@ -1549,8 +1916,6 @@ class _ProjectDetailsSheetState extends State<_ProjectDetailsSheet> {
                     ),
                   ),
                 ),
-
-                // Gallery (tap to fullscreen)
                 ClipRRect(
                   borderRadius: BorderRadius.circular(16),
                   child: AspectRatio(
@@ -1581,7 +1946,6 @@ class _ProjectDetailsSheetState extends State<_ProjectDetailsSheet> {
                               onTap: _openFullscreen,
                               child: Hero(
                                 tag: '${widget.title}_$i',
-                                // In the sheet, show more of the portrait by containing
                                 child: Image.asset(
                                   path,
                                   fit: BoxFit.contain,
@@ -1607,8 +1971,6 @@ class _ProjectDetailsSheetState extends State<_ProjectDetailsSheet> {
                   ),
                 ),
                 const SizedBox(height: 14),
-
-                // Title + Actions
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1622,18 +1984,16 @@ class _ProjectDetailsSheetState extends State<_ProjectDetailsSheet> {
                     const SizedBox(width: 8),
                     if (widget.siteUrl != null)
                       _ImageActionButton(
-                        asset:
-                            'assets/icons/web.png', // <- your website icon asset
+                        asset: 'assets/icons/web.png',
                         tooltip: 'Website',
                         semanticsLabel: 'Open website',
                         onTap: () => _open(widget.siteUrl!),
-                        size: 44, // slightly larger in the sheet
+                        size: 44,
                       ),
                     if (widget.githubUrl != null) ...[
                       const SizedBox(width: 6),
                       _ImageActionButton(
-                        asset:
-                            'assets/icons/github.png', // <- your GitHub icon asset
+                        asset: 'assets/icons/github.png',
                         tooltip: 'GitHub',
                         semanticsLabel: 'Open GitHub',
                         onTap: () => _open(widget.githubUrl!),
@@ -1642,19 +2002,15 @@ class _ProjectDetailsSheetState extends State<_ProjectDetailsSheet> {
                     ],
                   ],
                 ),
-
                 const SizedBox(height: 8),
-
                 _ChipScroller(tags: widget.tags),
                 const SizedBox(height: 12),
-
                 Text(
                   widget.desc,
                   style: Theme.of(
                     context,
                   ).textTheme.bodyLarge?.copyWith(height: 1.55),
                 ),
-
                 if (widget.details != null && widget.details!.isNotEmpty) ...[
                   const SizedBox(height: 10),
                   for (final d in widget.details!)
@@ -1666,7 +2022,6 @@ class _ProjectDetailsSheetState extends State<_ProjectDetailsSheet> {
                       ),
                     ),
                 ],
-
                 const SizedBox(height: 12),
                 Align(
                   alignment: isNarrow ? Alignment.center : Alignment.centerLeft,
@@ -2107,19 +2462,36 @@ class _Glass extends StatelessWidget {
 class _SkillChips extends StatelessWidget {
   final List<String> skills;
   const _SkillChips({required this.skills});
+
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      physics: const BouncingScrollPhysics(),
-      child: Row(
-        children: [
-          for (final s in skills)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Chip(label: Text(s)),
-            ),
-        ],
+    // Enable horizontal drag with mouse/trackpad on web
+    final behavior = const MaterialScrollBehavior().copyWith(
+      dragDevices: {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      },
+    );
+
+    return ScrollConfiguration(
+      behavior: behavior,
+      child: SizedBox(
+        height: 36, // fixed height so it won't push/overlap sections
+        width: double.infinity, // constrain to available width
+        child: Scrollbar(
+          interactive: true,
+          thumbVisibility: kIsWeb, // show thumb on web
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: skills.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, i) => Chip(label: Text(skills[i])),
+          ),
+        ),
       ),
     );
   }
