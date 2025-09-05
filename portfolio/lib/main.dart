@@ -582,40 +582,44 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
 
       // 🔧 Background + content layered correctly
-      body: Stack(
-        children: [
-          // Full-screen 3D background
-          Positioned.fill(
-            child: IgnorePointer(
-              child: _Platform3DBackground(
-                controller: _blobCtrl, // keep your looping controller
+      body: PrimaryScrollController(
+        controller: _scrollCtrl, // <- your existing controller
+        child: Stack(
+          children: [
+            // Full-screen 3D background
+            Positioned.fill(
+              child: IgnorePointer(
+                child: _Platform3DBackground(controller: _blobCtrl),
               ),
             ),
-          ),
 
-          // Foreground scrollable content
-          SingleChildScrollView(
-            controller: _scrollCtrl,
-            child: Column(
-              children: [
-                _Hero(
-                  controller: _blobCtrl,
-                  onHire: () => _open('mailto:rohitarer00@gmail.com'),
-                  onGitHub: () => _open('https://github.com/rohitarer'),
-                  onLinkedIn:
-                      () => _open(
-                        'https://www.linkedin.com/in/rohit-arer-a96294214/',
-                      ),
+            // Foreground scrollable content + scrollbar
+            Scrollbar(
+              thumbVisibility: true, // optional
+              child: SingleChildScrollView(
+                primary: true, // <- attach to PrimaryScrollController
+                child: Column(
+                  children: [
+                    _Hero(
+                      controller: _blobCtrl,
+                      onHire: () => _open('mailto:rohitarer00@gmail.com'),
+                      onGitHub: () => _open('https://github.com/rohitarer'),
+                      onLinkedIn:
+                          () => _open(
+                            'https://www.linkedin.com/in/rohit-arer-a96294214/',
+                          ),
+                    ),
+                    _SectionPad(key: aboutKey, child: const _About()),
+                    _SectionPad(key: expKey, child: const _Experience()),
+                    _SectionPad(key: projectsKey, child: const _Projects()),
+                    _SectionPad(key: contactKey, child: const _Contact()),
+                    const _Footer(),
+                  ],
                 ),
-                _SectionPad(key: aboutKey, child: const _About()),
-                _SectionPad(key: expKey, child: const _Experience()),
-                _SectionPad(key: projectsKey, child: const _Projects()),
-                _SectionPad(key: contactKey, child: const _Contact()),
-                const _Footer(),
-              ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -967,6 +971,8 @@ class _Hero extends StatelessWidget {
                         const SizedBox(height: 8),
                         Text(
                           'AI · ML · Flutter Developer',
+                          textAlign:
+                              isMobile ? TextAlign.center : TextAlign.start,
                           style: Theme.of(
                             context,
                           ).textTheme.displaySmall?.copyWith(
@@ -974,6 +980,7 @@ class _Hero extends StatelessWidget {
                             letterSpacing: -1.1,
                           ),
                         ),
+
                         const SizedBox(height: 12),
                         Text(
                           "I design & build intelligent apps that blend Flutter, Firebase, and AI.\n"
