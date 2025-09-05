@@ -919,7 +919,7 @@ class _Hero extends StatelessWidget {
                           fit: StackFit.expand,
                           children: [
                             Opacity(
-                              opacity: 0.4,
+                              opacity: 0.7,
                               child: Image.asset(
                                 'assets/rohit.png',
                                 fit: BoxFit.cover,
