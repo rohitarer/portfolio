@@ -562,7 +562,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     FilledButton.icon(
                       onPressed:
                           () => _open(
-                            'https://drive.google.com/your-resume-link',
+                            'https://drive.google.com/file/d/1l94Hh6b2aNyb1waGAzyW52Llds6Wo7w4/view?usp=sharing',
                           ),
                       icon: Image.asset(
                         'assets/resume2.png', // <- your resume icon image
@@ -818,7 +818,9 @@ class _AppDrawer extends StatelessWidget {
               title: const Text('Resume'),
               onTap: () {
                 Navigator.pop(context); // close the drawer
-                _open('https://drive.google.com/your-resume-link');
+                _open(
+                  'https://drive.google.com/file/d/1l94Hh6b2aNyb1waGAzyW52Llds6Wo7w4/view?usp=sharing',
+                );
               },
             ),
           ],
